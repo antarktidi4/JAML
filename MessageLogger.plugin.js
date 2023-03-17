@@ -2,7 +2,7 @@
  * @name JAML
  * @author hash
  * @description Just Another Message Logger for better discord
- * @version 0.1
+ * @version 0.2
  * @authorId 305715782732480512
  * @invite MrmPVe43T5
  */
@@ -15,7 +15,7 @@ module.exports = class MessageLogger {
         this.MessageStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMessages", "getMessage"), {first: true});
         this.ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getChannel", "getDMFromUserId"), {first: true});
         this.GuildStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getGuild", "getGuildCount"), {first: true});
-
+     
         this.CachedMessages = [];
         this.settings = this.getSettings();
     }
@@ -34,8 +34,9 @@ module.exports = class MessageLogger {
             }
         });
         BdApi.injectCSS("MessageLogger", 
-            `#logger-modal-window {
-                display: none;
+            `
+            #logger-modal-window {
+                display: block;
                 position: fixed;
                 z-index: 999;
                 padding-top: 10vh;
@@ -50,16 +51,45 @@ module.exports = class MessageLogger {
                 margin: auto;
                 width: 80%;
                 overflow-wrap: break-word;
-                background-color: var(--background-primary);
                 border-radius: 0px 0px 7px 7px;
             }
 
-            .logger-content-header {
+            .d-flex {
                 display: flex;
-                width: 100%;
-                background-color: var(--background-tertiary);
-                height: 20px;
             }
+            .row {
+                flex-direction: row;
+            }
+            .col {
+                flex-direction: col;
+            }
+            
+            .bg-tertiary {
+                background-color: var(--background-tertiary);
+            }
+            .bg-primary {
+                background-color: var(--background-primary);
+            }
+            .bg-secondary {
+                background-color: var(--background-secondary);
+            }
+            .bg-hover-tertiary:hover {
+                background-color: var(--background-tertiary);
+            }
+            .bg-hover-primary:hover {
+                background-color: var(--background-primary);
+            }
+            .bg-hover-secondary:hover {
+                background-color: var(--background-secondary);
+            }
+
+            .c-normal {
+                color: var(--text-normal);
+            }
+            .c-muted {
+                color: var(--text-muted);
+            }
+
             .logger-page {
                 overflow: auto;
                 max-height: 500px;
@@ -68,19 +98,14 @@ module.exports = class MessageLogger {
             .logger-page::-webkit-scrollbar {
                 display: none;
             }
+            .logger-page-header {
+                width: 100%;
+                height: 20px;
+            }
 
-            .logger-button {
-                background-color: var(--background-tertiary);
-                color: var(--text-muted);
-            }
-            .logger-button:hover {
-                background-color: var(--background-secondary);
-            }
             .logger-input {
                 width: 100%;
                 border: none;
-                background-color: var(--background-tertiary);
-                color: var(--text-normal);
             }
 
             .logger-settings-field {
@@ -88,16 +113,27 @@ module.exports = class MessageLogger {
                 margin-bottom: 10px;
                 padding: 10px;
                 border-radius: 7px;
-                color: var(--text-normal);
-                background-color: var(--background-secondary);
             }
-            .logger-message {
-                background-color: var(--background-secondary);
+            .logger-message-wrapper {
                 padding: 10px;
                 margin: 10px;
                 border-radius: 7px;
-                color: var(--text-normal);
-            }`
+            }
+            .logger-message-avatar {
+                width: 2.5rem;
+                height: 2.5rem;
+                border-radius: 50%;
+            }
+            .logger-message-content-wrapper {
+                padding-left: 1rem;
+            }
+            .logger-message-header {
+                margin-bottom: 5px;
+            }
+            .logger-message-content {
+                margin-bottom: 5px;
+            }
+            `
         );
     }
 
@@ -110,40 +146,52 @@ module.exports = class MessageLogger {
 
 
     /*================= HANDLERS START ======================*/
-    onDelete(channelID, messageID) {
-        const message = this.MessageStore.getMessage(channelID, messageID);
+    onDelete(channelId, messageId) {
+        const proceedCaching = !this.settings.is_whitelist_used || (this.settings.whitelist.channels.includes(channelId) || this.settings.whitelist.guilds.includes(messageId));
+        if (!proceedCaching) return;
+
+        const message = this.MessageStore.getMessage(channelId, messageId);
         if (message === undefined) return;
+
         const clearMessage = this.getClearMessage(message);
-        if (!this.proceedCaching(clearMessage)) return;
         this.CachedMessages.push(clearMessage);
-        BdApi.showToast(`message deleted ${clearMessage.guild.name}/${clearMessage.channel.name}`);
+        BdApi.showToast(`message deleted ${clearMessage?.guild?.name}/${clearMessage?.channel?.name}`);
     }
     /*================== HANDLERS END =======================*/
 
     /*=================== MISC START ========================*/
-    /*guild and channels can be stored in the separeted list */
-    /*and clear message will hold only ids                   */
-    /*for memory efficient (i think it works like this...)   */
     initHtml() {
         const mount = document.createElement("div");
         mount.id = "logger-mount";
         document.body.appendChild(mount);
-        BdApi.ReactDOM.createRoot(document.getElementById("logger-mount")).render(React.createElement(ModalWindow));
+        const root = BdApi.ReactDOM.createRoot(document.getElementById("logger-mount"))
 
         const menuBarNode = document.getElementsByClassName("tutorialContainer-1pL9QS")[0];
-        const menuButton = React.createElement("button", {id: "logger-menu-button", class: "listItem-3SmSlK logger-button"}, "logger");
-        menuButton.props.onClick = () => document.getElementById("logger-modal-window").style.display = "block";
+        const menuButton = React.createElement("button", {id: "logger-menu-button", class: "listItem-3SmSlK bg-tertiary c-muted bg-hover-secondary"}, "logger"); 
         BdApi.ReactDOM.render(BdApi.ReactDOM.createPortal(menuButton, menuBarNode), document.createElement("div"));
-
+        
+        menuButton.props.onClick = () => {
+            root.render(React.createElement(ModalWindow));
+        };
         window.onclick = (e) => {
-            const modalWindow = document.getElementById("logger-modal-window");
-            if (e.target == modalWindow) modalWindow.style.display = "none";
+            if (e.target == document.getElementById("logger-modal-window")) root.render(null);
         };
     }
-
+    
     destructHtml() {
         document.getElementById("logger-mount").remove();
         document.getElementById("logger-menu-button").remove();
+    }
+
+    getSettings() {
+        const default_settings = {
+            is_whitelist_used: false,
+            whitelist: {
+                channels: [],
+                guilds: []
+            }
+        };
+        return Object.assign({}, default_settings, BdApi.loadData("MessageLogger", "settings"));
     }
 
     getClearMessage(message) {
@@ -182,6 +230,7 @@ module.exports = class MessageLogger {
         return {
             username: author?.username,
             discriminator: author?.discriminator,
+            bot: author?.bot,
             id: author?.id,
             avatar_url: `https://cdn.discordapp.com/avatars/${author?.id}/${author?.avatar}.png?size=128`
         };
@@ -195,56 +244,20 @@ module.exports = class MessageLogger {
             name: a.filename
         }));
     }
-
-    getSettings() {
-        const default_settings = {
-            is_whitelist_used: false,
-            whitelist: {
-                channels: [],
-                guilds: []
-            }
-        };
-        return Object.assign({}, default_settings, BdApi.loadData("MessageLogger", "settings"));
-    }
-
-    proceedCaching(message) {
-        return !this.settings.is_whitelist_used || (this.settings.whitelist.channels.includes(message.channel.id) || this.settings.whitelist.guilds.includes(message.guild.id));
-    }
     /*===================  MISC END  ========================*/
 };
 
 /*=================== MENU START ========================*/
 /*I don't know how to use js and react :/                */
 /*so it's a big chunk of shit                            */
-class ModalWindow extends React.Component {
-    render() {
-        return React.createElement(
-            "div", {id: "logger-modal-window"},
-            React.createElement(ModalContent)
-        );
-    }
+const ModalWindow = () => {
+    return React.createElement("div", {id: "logger-modal-window"}, React.createElement(ModalContent));
 }
 
-class ModalContent extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = {
-            page: "log"
-        };
-    }
+const ModalContent = () => {
+    const [page, setPage] = React.useState("log");
 
-    renderHeader() {
-        const generateButton = (text) => React.createElement("button", {class: "logger-button", onClick: () => this.setState({page: text})}, text);
-
-        return React.createElement("div", {class: "logger-content-header"}, 
-                generateButton("log"),
-                generateButton("settings"),
-                generateButton("dump"),
-                generateButton("load")
-            )
-    }
-
-    renderPage(text) {
+    function renderPage(text) {
         switch (text) {
             case "log":
                 return React.createElement(LogPage)
@@ -257,104 +270,103 @@ class ModalContent extends React.Component {
         }
     }
 
-    render() {
-        return React.createElement(
-            "div",
-            {id: "logger-modal-content"},
-            this.renderHeader(),
-            this.renderPage(this.state.page)
+    return React.createElement(
+            "div", {id: "logger-modal-content", class: "bg-primary"},
+            React.createElement("div", {class: "logger-page-header d-flex bg-tertiary"}, 
+                React.createElement("button", {class: "bg-tertiary c-muted bg-hover-secondary", onClick: () => setPage("log")}, "log"),
+                React.createElement("button", {class: "bg-tertiary c-muted bg-hover-secondary", onClick: () => setPage("settings")}, "settings"),
+                React.createElement("button", {class: "bg-tertiary c-muted bg-hover-secondary", onClick: () => setPage("dump")}, "dump"),
+                React.createElement("button", {class: "bg-tertiary c-muted bg-hover-secondary", onClick: () => setPage("load")}, "load")
+            ),
+            renderPage(page)
         );
-    }
 }
 
-class LogPage extends React.Component {
-    render() {
-        const messages = BdApi.Plugins.get("JAML").instance.CachedMessages.slice().reverse().map(message => React.createElement(Message, {message}));
-        return React.createElement("div", {class: "logger-page"}, messages);
-    }
+const LogPage = () => {
+    const messages = BdApi.Plugins.get("JAML").instance.CachedMessages.slice().reverse();
+    const messageList = messages.map(message => React.createElement(Message, {message}));
+
+    return React.createElement("div", {class: "logger-page"}, messageList);
 }
 
-class SettingsPage extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = {
-            settings: BdApi.Plugins.get("JAML").instance.settings
-        };
+const SettingsPage = () => {
+    const [guilds, setGuilds] = React.useState(BdApi.Plugins.get("JAML").instance.settings.whitelist.guilds);
+    const [channels, setChannels] = React.useState(BdApi.Plugins.get("JAML").instance.settings.whitelist.channels);
+    const [whitelist, setWhitelist] = React.useState(BdApi.Plugins.get("JAML").instance.settings.is_whitelist_used);
+
+    function handleGuildsChange(e) {
+        setGuilds(e.target.value.split(",").map(channel => channel.trim()));
     }
 
-    componentWillUnmount() {
+    function handleChannelsChange(e) {
+        setChannels(e.target.value.split(",").map(channel => channel.trim()));
+    }
+
+    function handleWhitelistClick() {
+        setWhitelist(!whitelist);
+    }
+
+    React.useEffect(() => {
         const settings = {
             whitelist: {
-                guilds: document.getElementById("logger-input-guilds").value?.split(",").map(channel => channel.trim()),
-                channels: document.getElementById("logger-input-channels").value?.split(",").map(channel => channel.trim()),
+                guilds: guilds,
+                channels: channels,
             },
-            is_whitelist_used: document.getElementById("logger-input-whitelist").textContent.includes("on") ? true : false
+            is_whitelist_used: whitelist
         };
         BdApi.Plugins.get("JAML").instance.settings = settings;
-    }
+    });
 
-    render() {
-        const onWhiteListClick = () => {
-            let settings = this.state.settings;
-            settings.is_whitelist_used = !settings.is_whitelist_used;
-            this.setState({settings});
-        }
-
-        return React.createElement("div", {class: "logger-page"},
-            React.createElement("div", {class: "logger-settings-field"},
-                React.createElement("label", {}, "guild whitelist: ",
-                    React.createElement("input", {id: "logger-input-guilds", class: "logger-input", defaultValue: this.state.settings.whitelist.guilds}) 
-                )
-            ),
-            React.createElement("div", {class: "logger-settings-field"},
-                React.createElement("label", {}, "channel whitelist: ",
-                    React.createElement("input", {id: "logger-input-channels", class: "logger-input", defaultValue: this.state.settings.whitelist.channels}) 
-                )
-            ),
-            React.createElement("div", {class: "logger-settings-field"},
-                React.createElement("label", {}, "whitelist enabled: ",
-                    React.createElement("button", {id: "logger-input-whitelist", class: "logger-button", onClick: onWhiteListClick}, this.state.settings.is_whitelist_used ? "on" : "off") 
-                )
+    return React.createElement("div", {class: "logger-page"},
+        React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
+            React.createElement("label", {}, "guild whitelist: ",
+                React.createElement("input", {id: "logger-input-guilds", class: "logger-input bg-tertiary c-normal", onChange: handleGuildsChange, defaultValue: guilds}) 
             )
-        );
-    }
+        ),
+        React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
+            React.createElement("label", {}, "channel whitelist: ",
+                React.createElement("input", {id: "logger-input-channels", class: "logger-input bg-tertiary c-normal", onChange: handleChannelsChange, defaultValue: channels}) 
+            )
+        ),
+        React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
+            React.createElement("label", {}, "whitelist enabled: ",
+                React.createElement("button", {id: "logger-input-whitelist", class: "bg-tertiary c-muted bg-hover-secondary", onClick: handleWhitelistClick}, whitelist ? "on" : "off") 
+            )
+        )
+    );
 }
 
-class Message extends React.Component {
-    render() {
-        const message = this.props.message;
-        const header = React.createElement("div", {style: {marginBottom: "5px"}}, `${message?.author?.username} in ${message?.guild?.name}/${message?.channel?.name} (${new Date(message.time).toUTCString()})`);
-        const content = React.createElement("div", {style: {marginBottom: "5px"}}, message.content);
-        const attachments = message.attachments?.map(attachment => React.createElement(Attachment, {attachment}));
-
-        return React.createElement("div", {class: "logger-message", id: `message-${message.id}`}, header, content, attachments);
+const Message = ({message}) => {
+    function linkify(text) {
+        var urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        return text.replace(urlRegex, function(url) {
+            return '<a href="' + url + '">' + url + '</a>';
+        });
     }
+
+    return React.createElement("div", {class: "logger-message-wrapper d-flex bg-secondary c-normal", key: `message-id-${message.id}`},
+        React.createElement("img", {src: message?.author?.avatar_url, class: "logger-message-avatar col"}),
+        React.createElement("div", {class: "logger-message-content-wrapper col"}, 
+            React.createElement("div", {class: "logger-message-header row"}, `${message?.author?.username} in ${message?.guild?.name}/${message?.channel?.name} (${new Date(message.time).toUTCString()})`),
+            React.createElement("div", {class: "logger-messsage-content row", dangerouslySetInnerHTML: {__html: linkify(message?.content)}}),
+            message?.attachments?.map(attachment => React.createElement(Attachment, {attachment}))
+        )
+    );
 }
 
-class Attachment extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = {
-            settings: {
-                height: 200
-            }
-        }
-    }
+const Attachment = ({attachment}) => {
+    const height = 200;
 
-    renderMedia(attachment) {
+    function renderMedia(attachment) {
         if (attachment?.type.includes("image")) {
-            return React.createElement("img", {src: attachment?.url, height: this.state.settings.height});
+            return React.createElement("img", {src: attachment?.url, height: height});
         } else if (attachment?.type.includes("video")) {
-            return React.createElement("video", {src: attachment?.url, height: this.state.settings.height, type: attachment.type, controls: true, muted: true});
+            return React.createElement("video", {src: attachment?.url, height: height, type: attachment.type, controls: true, muted: true});
         } else {
             return null;
         }
     }
 
-    render() {
-        const attachment = this.renderMedia(this.props.attachment);
-        return React.createElement("a", {href: this.props.attachment?.url, style: {marginRight: "5px"}}, attachment);
-    }
+    return React.createElement("a", {href: attachment?.url, style: {marginRight: "5px"}}, renderMedia(attachment))
 }
-
 /*===================  MENU END  ========================*/
