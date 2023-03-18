@@ -147,13 +147,13 @@ module.exports = class MessageLogger {
 
     /*================= HANDLERS START ======================*/
     onDelete(channelId, messageId) {
-        const proceedCaching = !this.settings.is_whitelist_used || (this.settings.whitelist.channels.includes(channelId) || this.settings.whitelist.guilds.includes(messageId));
-        if (!proceedCaching) return;
-
         const message = this.MessageStore.getMessage(channelId, messageId);
         if (message === undefined) return;
-
+        
         const clearMessage = this.getClearMessage(message);
+
+        const proceedCaching = !this.settings.is_whitelist_used || (this.settings.whitelist.channels.includes(clearMessage?.channel?.id) || this.settings.whitelist.guilds.includes(clearMessage?.guild.id));
+        if (!proceedCaching) return;
         this.CachedMessages.push(clearMessage);
         BdApi.showToast(`message deleted ${clearMessage?.guild?.name}/${clearMessage?.channel?.name}`);
     }
