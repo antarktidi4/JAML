@@ -5,6 +5,5 @@ Just Another Message Logger for better discord
 
 ## TODO
 - dump and load data
-- DM delete, bulk delete, edit handlers
-- auto update log
+- bulk delete, edit handler
 - preset video volume to 0.2
