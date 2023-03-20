@@ -2,7 +2,7 @@
  * @name JAML
  * @author hash
  * @description Just Another Message Logger for better discord
- * @version 0.3
+ * @version 0.4
  * @authorId 305715782732480512
  * @invite MrmPVe43T5
  */
@@ -12,6 +12,7 @@ const { React } = BdApi;
 module.exports = class MessageLogger {
     constructor(meta) {
         this.Dispatch = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("dispatch", "subscribe"), {first: true});
+        this.UserStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getUsers", "getUser"), {first: true});
         this.MessageStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMessages", "getMessage"), {first: true});
         this.ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getChannel", "getDMFromUserId"), {first: true});
         this.GuildStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getGuild", "getGuildCount"), {first: true});
@@ -39,7 +40,7 @@ module.exports = class MessageLogger {
                 if (!this.proceedCaching(compressedMessage)) return;
 
                 this.cachedMessages.push(compressedMessage);
-                if (guildIsNone) {
+                if (compressedMessage?.guild?.id === undefined) {
                     BdApi.showToast(`message deleted DM/${compressedMessage?.author?.username}`);
                 } else {
                     BdApi.showToast(`message deleted ${compressedMessage?.guild?.name}/${compressedMessage?.channel?.name}`);
@@ -138,6 +139,7 @@ module.exports = class MessageLogger {
                 border-radius: 50%;
             }
             .logger-message-content-wrapper {
+                user-select: text !important;
                 padding-left: 1rem;
             }
             .logger-message-header {
@@ -306,9 +308,9 @@ const SettingsPage = () => {
     React.useEffect(() => {
         const settings = {
             whitelist: {
-                guilds: guilds,
-                channels: channels,
-                dm: dm
+                guilds,
+                channels,
+                dm
             },
             is_whitelist_used: whitelist
         };
@@ -318,22 +320,22 @@ const SettingsPage = () => {
     return React.createElement("div", {class: "logger-page"},
         React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
             React.createElement("label", {}, "guild whitelist: ",
-                React.createElement("input", {id: "logger-input-guilds", class: "logger-input bg-tertiary c-normal", onChange: handleGuildsChange, defaultValue: guilds}) 
+                React.createElement("input", {class: "logger-input bg-tertiary c-normal", onChange: handleGuildsChange, defaultValue: guilds}) 
             )
         ),
         React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
             React.createElement("label", {}, "channel whitelist: ",
-                React.createElement("input", {id: "logger-input-channels", class: "logger-input bg-tertiary c-normal", onChange: handleChannelsChange, defaultValue: channels}) 
+                React.createElement("input", {class: "logger-input bg-tertiary c-normal", onChange: handleChannelsChange, defaultValue: channels}) 
             )
         ),
         React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
             React.createElement("label", {}, "DM whitelist: ",
-                React.createElement("input", {id: "logger-input-dm", class: "logger-input bg-tertiary c-normal", onChange: handleDmChange, defaultValue: dm}) 
+                React.createElement("input", {class: "logger-input bg-tertiary c-normal", onChange: handleDmChange, defaultValue: dm}) 
             )
         ),
         React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
             React.createElement("label", {}, "whitelist enabled: ",
-                React.createElement("button", {id: "logger-input-whitelist", class: "bg-tertiary c-muted bg-hover-secondary", onClick: handleWhitelistClick}, whitelist ? "on" : "off") 
+                React.createElement("button", {class: "bg-tertiary c-muted bg-hover-secondary", onClick: handleWhitelistClick}, whitelist ? "on" : "off") 
             )
         )
     );
@@ -341,6 +343,8 @@ const SettingsPage = () => {
 
 const Message = ({message}) => {
     const ATTACHMENT_HEIGHT = 200;
+    // I don't think this is a good idea..
+    const getUser = BdApi.Plugins.get("JAML").instance.UserStore.getUser;
 
     function renderAttachment(attachment) {
         var media = null;
@@ -356,9 +360,22 @@ const Message = ({message}) => {
 
     function renderContent(text) {
         const urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        const emojiRegex = /<:[A-Za-z0-9]+:[0-9]+>/i;
+        const userRegex = /<@[0-9]+>/i;
 
         return text.split(" ").map(part => {
-            return urlRegex.test(part) ? React.createElement("a", {href: part}, part) : part + " "
+            if (urlRegex.test(part)) {
+                return React.createElement("a", {href: part}, part + " ");
+            } else if (emojiRegex.test(part)) {
+                const emojiId = part.substring(0, part.length - 1).split(":")[2];
+                return React.createElement("img", {src: `https://cdn.discordapp.com/emojis/${emojiId}`, height: "18px"});
+            } else if(userRegex.test(part)) {
+                const userId = part.substring(2, part.length - 1);
+                const user = getUser(userId);
+                return `@${user.username} `;
+            } else {
+                return part + " ";
+            }
         });
     }
 
