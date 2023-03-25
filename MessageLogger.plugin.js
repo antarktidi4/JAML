@@ -2,7 +2,7 @@
  * @name JAML
  * @author hash
  * @description Just Another Message Logger for better discord
- * @version 0.4
+ * @version 0.5
  * @authorId 305715782732480512
  * @invite MrmPVe43T5
  */
@@ -11,160 +11,65 @@ const { React } = BdApi;
 
 module.exports = class MessageLogger {
     constructor(meta) {
-        this.Dispatch = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("dispatch", "subscribe"), {first: true});
-        this.UserStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getUsers", "getUser"), {first: true});
-        this.MessageStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMessages", "getMessage"), {first: true});
-        this.ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getChannel", "getDMFromUserId"), {first: true});
-        this.GuildStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getGuild", "getGuildCount"), {first: true});
-        
-        this.cachedMessages = [];
+        this.meta = meta;
         this.settings = this.getSettings();
+        this.cachedMessages = new MessageCache();
     }
 
     start() {
-        this.initHtml();
-        BdApi.Patcher.before("MessageLogger", this.Dispatch, "dispatch", (_, args, original) => {
+        this.mountHtml();
+        BdApi.Patcher.before(this.meta.name, DiscordModules.getInstance().Dispatch, "dispatch", (_, args, original) => {
             const dispatch = args[0];
             if (!dispatch) return;
-            
+
             if (dispatch.type === "MESSAGE_UPDATE") {
-                // TODO
-                return;
+                const message = this.cachedMessages.getOrCreate(dispatch.message.channel_id, dispatch.message.id);
+                if (!message) return;
+                // Converting tenor links to gif calls message_update event. I hate discord.
+                if (message?.embeds?.length != dispatch?.message?.embeds?.length) return;
+
+                message.content.push(dispatch.message.content);
+                this.cachedMessages.updateCache(message)
+                this.notify(message, "edited");
             }
 
             if (dispatch.type === "MESSAGE_DELETE") {
-                const message = this.MessageStore.getMessage(dispatch.channelId, dispatch.id);
-                if (message === undefined) return;
+                const message = this.cachedMessages.getOrCreate(dispatch.channelId, dispatch.id);
+                if (!message) return;
+                const currentUser = DiscordModules.getInstance().UserStore.getCurrentUser();
+                // Discord sends two events if the current user deletes a message. I hate discord.
+                if(message?.author?.id === currentUser.id && Object.keys(dispatch).length === 4) return;
 
-                const compressedMessage = this.compressMessage(message);
-                if (!this.proceedCaching(compressedMessage)) return;
-
-                this.cachedMessages.push(compressedMessage);
-                if (compressedMessage?.guild?.id === undefined) {
-                    BdApi.showToast(`message deleted DM/${compressedMessage?.author?.username}`);
-                } else {
-                    BdApi.showToast(`message deleted ${compressedMessage?.guild?.name}/${compressedMessage?.channel?.name}`);
-                }
+                this.cachedMessages.updateCache(message)
+                this.notify(message, "deleted");
             }
         });
-        BdApi.injectCSS("MessageLogger", 
-            `
-            #logger-modal-window {
-                display: block;
-                position: fixed;
-                z-index: 999;
-                padding-top: 10vh;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                overflow: auto;
-                background-color: rgba(0,0,0,0.7);
-            }
-            #logger-modal-content {
-                margin: auto;
-                width: 80%;
-                overflow-wrap: break-word;
-                border-radius: 0px 0px 7px 7px;
-            }
-
-            .d-flex {
-                display: flex;
-            }
-            .row {
-                flex-direction: row;
-            }
-            .col {
-                flex-direction: col;
-            }
-            
-            .bg-tertiary {
-                background-color: var(--background-tertiary);
-            }
-            .bg-primary {
-                background-color: var(--background-primary);
-            }
-            .bg-secondary {
-                background-color: var(--background-secondary);
-            }
-            .bg-hover-tertiary:hover {
-                background-color: var(--background-tertiary);
-            }
-            .bg-hover-primary:hover {
-                background-color: var(--background-primary);
-            }
-            .bg-hover-secondary:hover {
-                background-color: var(--background-secondary);
-            }
-
-            .c-normal {
-                color: var(--text-normal);
-            }
-            .c-muted {
-                color: var(--text-muted);
-            }
-
-            .logger-page {
-                overflow: auto;
-                max-height: 500px;
-                padding: 10px;
-            }
-            .logger-page::-webkit-scrollbar {
-                display: none;
-            }
-            .logger-page-header {
-                width: 100%;
-                height: 20px;
-            }
-
-            .logger-input {
-                width: 100%;
-                border: none;
-            }
-
-            .logger-settings-field {
-                margin-top: 10px;
-                margin-bottom: 10px;
-                padding: 10px;
-                border-radius: 7px;
-            }
-            .logger-message-wrapper {
-                padding: 10px;
-                margin: 10px;
-                border-radius: 7px;
-            }
-            .logger-message-avatar {
-                width: 2.5rem;
-                height: 2.5rem;
-                border-radius: 50%;
-            }
-            .logger-message-content-wrapper {
-                user-select: text !important;
-                padding-left: 1rem;
-            }
-            .logger-message-header {
-                margin-bottom: 5px;
-            }
-            .logger-message-content {
-                margin-bottom: 5px;
-            }
-            `
+        BdApi.injectCSS(this.meta.name, 
+            `#logger-modal-window{display:block;position:fixed;z-index:999;padding-top:10vh;left:0;top:0;width:100%;height:100%;overflow:auto;background-color:rgba(0,0,0,.7)}
+            #logger-modal-content{margin:auto;width:80%;word-break:break-word;border-radius:0 0 7px 7px}.d-flex{display:flex}.row{flex-direction:row}.col{flex-direction:col}
+            .bg-hover-tertiary:hover,.bg-tertiary{background-color:var(--background-tertiary)}.bg-hover-primary:hover,.bg-primary{background-color:var(--background-primary)}
+            .bg-hover-secondary:hover,.bg-secondary{background-color:var(--background-secondary)}.c-normal{color:var(--text-normal)}.c-muted{color:var(--text-muted)}
+            .logger-page{overflow:auto;max-height:75vh;padding:10px}.logger-page::-webkit-scrollbar{display:none}.logger-page-header{width:100%;height:20px}
+            .logger-input{width:100%;border:none}.logger-settings-field{margin-top:10px;margin-bottom:10px;padding:10px;border-radius:7px}
+            .logger-message-wrapper{padding:10px;margin:10px;border-radius:7px}.logger-message-avatar{width:2.5rem;height:2.5rem;border-radius:50%}
+            .logger-message-content-wrapper{user-select:text!important;padding-left:1rem}.logger-message-content,.logger-message-header{margin-bottom:5px}`
         );
     }
 
     stop() {
         document.getElementById("logger-mount").remove();
         document.getElementById("logger-menu-button").remove();
-        BdApi.Patcher.unpatchAll("MessageLogger");
-        BdApi.clearCSS("MessageLogger");
-        BdApi.saveData("MessageLogger", "settings", this.settings);
+        BdApi.Patcher.unpatchAll(this.meta.name);
+        BdApi.clearCSS(this.meta.name);
+        BdApi.saveData(this.meta.name, "settings", this.settings);
     }
 
     /*=================== MISC START ========================*/
-    initHtml() {
+    mountHtml() {
         const mount = document.createElement("div");
         mount.id = "logger-mount";
         document.body.appendChild(mount);
+
         const root = BdApi.ReactDOM.createRoot(document.getElementById("logger-mount"))
 
         const menuBarNode = document.getElementsByClassName("tutorialContainer-1pL9QS")[0];
@@ -181,65 +86,171 @@ module.exports = class MessageLogger {
 
     getSettings() {
         const default_settings = {
+            log_bot_messages: false,
             is_whitelist_used: false,
             whitelist: {
                 channels: [],
-                guilds: [],
-                dm: []
+                guilds: []
             }
         };
-        return Object.assign({}, default_settings, BdApi.loadData("MessageLogger", "settings"));
+        return Object.assign({}, default_settings, BdApi.loadData(this.meta.name, "settings"));
     }
 
-    proceedCaching(compressedMessage) {
-        const whitelistUsed = this.settings.is_whitelist_used;
-        const idInChannels = this.settings.whitelist.channels.includes(compressedMessage?.channel?.id);
-        const idInGuilds = this.settings.whitelist.guilds.includes(compressedMessage?.guild?.id);
-        const idInDms = this.settings.whitelist.dm.includes(compressedMessage?.author?.id);
-        const guildIsNone = compressedMessage?.guild?.id === undefined;
+    notify(message, event) {
+        if (!message?.guild?.id) {
+            BdApi.showToast(`message ${event} DM/${message?.author?.username}`);
+        } else {
+            BdApi.showToast(`message ${event} ${message?.guild?.name}/${message?.channel?.name}`);
+        }
+    }
+    /*===================  MISC END  ========================*/
+};
 
-        return !whitelistUsed || ((idInChannels || idInGuilds) || (idInDms && guildIsNone));
+class DiscordModules {
+    static getInstance() {
+        if (!DiscordModules.instance) DiscordModules.instance = new DiscordModules();
+        return DiscordModules.instance;
     }
 
-    compressMessage(message) {
-        const channel = this.ChannelStore.getChannel(message?.channel_id);
-        const guild   = this.GuildStore.getGuild(channel?.guild_id);
+    constructor() {
+        this.Dispatch = this.#getModuleByProps("dispatch", "subscribe");
+        this.GuildStore = this.#getModuleByProps("getGuild", "getGuildCount");
+        this.ChannelStore = this.#getModuleByProps("getChannel", "getDMFromUserId");
+        this.MessageStore = this.#getModuleByProps("getMessages", "getMessage");
+        this.UserStore = this.#getModuleByProps("getUsers", "getUser");
+        DiscordModules.instance = this;
+    }
 
-        const compressedGuild = !guild ? null : {
+    #getModuleByProps(...props) {
+        const propsFilter = BdApi.Webpack.Filters.byProps(...props);
+        return BdApi.Webpack.getModule(propsFilter, {first: true});
+    }
+}
+
+class MessageCache {
+    constructor() {
+        this.cache = [];
+    }
+
+    proceedCaching(message) {
+        // My idea was providing settings in the constructor in the main class (`MessageCache(this.settings)`)
+        // but it clones the value instead of reference it, idk why.
+        var settings = BdApi.Plugins.get("JAML").instance.settings;
+        
+        if (!settings.log_bot_messages && message?.author?.bot) return false;
+        if (!settings.is_whitelist_used) return true;
+      
+        const idInGuilds = settings.whitelist.guilds.includes(message?.guild?.id);
+        const idInChannels = settings.whitelist.channels.includes(message?.channel?.id);
+      
+        return idInGuilds || idInChannels;
+    }
+
+    getOrCreate(channelId, messageId) {
+        var message = this.cache.find(m => m.id == messageId);
+        if (!message) {
+            message = DiscordModules.getInstance().MessageStore.getMessage(channelId, messageId);
+            if (!message) return undefined;
+            message = MessageCompressor.compress(message);
+            if(!this.proceedCaching(message)) return undefined;
+            this.cache.push(message);
+        }
+        return message;
+    }
+
+    updateCache(message) {
+        const messageIndex = this.cache.findIndex(m => m.id == message.id);
+        if (messageIndex > -1) this.cache.splice(messageIndex, 1);
+        this.cache.push(message);
+    }
+
+    dump() {
+        //todo
+    }
+
+    load() {
+        //todo
+    }
+}
+
+class MessageCompressor {
+    static #tools = {
+        getGuild: DiscordModules.getInstance().GuildStore.getGuild,
+        getChannel: DiscordModules.getInstance().ChannelStore.getChannel,
+        getUser: DiscordModules.getInstance().UserStore.getUser
+    }
+    
+    static compress(message) {
+        const channel = MessageCompressor.#tools.getChannel(message?.channel_id);
+        const guild = MessageCompressor.#tools.getGuild(channel?.guild_id);
+        
+        return {
+            guild: MessageCompressor.#compressGuild(guild),
+            channel: MessageCompressor.#compressChannnel(channel),
+            author: MessageCompressor.#compressAuthor(message?.author),
+            attachments: MessageCompressor.#compressAttachments(message?.attachments),
+            embeds: message?.embeds,
+            content: [MessageCompressor.#replacePings(message?.content, guild?.roles)],
+            id: message?.id,
+            time: Date.now()
+        };
+    }
+
+    static #compressGuild(guild) {
+        if (!guild) return null;
+        return {
             name: guild?.name,
             id: guild?.id
         };
+    }
 
-        const compressedChannel = !channel ? null : {
+    static #compressChannnel(channel) {
+        if (!channel) return null;
+        return {
             name: channel?.name,
             id: channel?.id,
         };
+    }
 
-        const compressedAuthor = !message?.author ? null : {
-            username: message?.author?.username,
-            discriminator: message?.author?.discriminator,
-            id: message?.author?.id,
-            avatar_url: `https://cdn.discordapp.com/avatars/${message?.author?.id}/${message?.author?.avatar}.png?size=128`
+    static #compressAuthor(author) {
+        if (!author) return null;
+        return {
+            username: author?.username,
+            discriminator: author?.discriminator,
+            id: author?.id,
+            avatar_url: `https://cdn.discordapp.com/avatars/${author?.id}/${author?.avatar}.png?size=128`,
+            bot: author?.bot
         };
+    }
 
-        const compressedAttachments = !message?.attachments ? null : message.attachments.map(a => ({
+    static #compressAttachments(attachments) {
+        if (!attachments) return null;
+        return attachments.map(a => ({
             url: a.proxy_url,
             type: a.content_type,
             name: a.filename
         }));
+    }
 
-        return {
-            guild: compressedGuild,
-            channel: compressedChannel,
-            author: compressedAuthor,
-            attachments: compressedAttachments,
-            content: message?.content,
-            id: message?.id,
-            time: Date.now()
+    static #replacePings(content, roles) {
+        // Replaces the substring finded by the regex in the content with the findFn function.
+        // Example: replace("test <@1234>", /<@[0-9]+>/ig, (id) => MessageTools.#tools.getUser(id)?.username) -> "test @username"
+        const replace = (content, regexp, findFn) => {
+            return content?.replaceAll(regexp, (ping) => {
+                ping = ping?.replaceAll(/[<>]/ig, '');
+                const id = ping?.match(/[0-9]+/);
+                return ping?.replace(id, findFn(id));
+            });
         };
-    }       
-    /*===================  MISC END  ========================*/
-};
+
+        content = replace(content, /<#[0-9]+>/ig, (id) => MessageCompressor.#tools.getChannel(id)?.name);
+        content = replace(content, /<@&[0-9]+>/ig, (id) => roles?.[id]?.name);
+        content = replace(content, /<@[0-9]+>/ig, (id) => MessageCompressor.#tools.getUser(id)?.username);
+        return content;
+    }
+}
+
+
 
 /*=================== MENU START ========================*/
 /*I don't know how to use js and react :/                */
@@ -258,9 +269,9 @@ const ModalContent = () => {
             case "settings":
                 return React.createElement(SettingsPage)
             case "dump":
-                return React.createElement("div", {style: {color: "#FFFFFF", padding: "20px"}}, "NIY")
+                return React.createElement("div", {style: {color: "#FFFFFF", padding: "20px", "font-size": "18px"}}, "NIY")
             case "load":
-                return React.createElement("div", {style: {color: "#FFFFFF", padding: "20px"}}, "NIY")
+                return React.createElement("div", {style: {color: "#FFFFFF", padding: "20px", "font-size": "18px"}}, "NIY")
         }
     }
 
@@ -277,7 +288,7 @@ const ModalContent = () => {
 }
 
 const LogPage = () => {
-    const messages = BdApi.Plugins.get("JAML").instance.cachedMessages.slice().reverse();
+    const messages = BdApi.Plugins.get("JAML").instance.cachedMessages.cache.slice().reverse();
     const messageList = messages.map(message => React.createElement(Message, {message}));
 
     return React.createElement("div", {class: "logger-page"}, messageList);
@@ -286,8 +297,8 @@ const LogPage = () => {
 const SettingsPage = () => {
     const [guilds, setGuilds] = React.useState(BdApi.Plugins.get("JAML").instance.settings.whitelist.guilds);
     const [channels, setChannels] = React.useState(BdApi.Plugins.get("JAML").instance.settings.whitelist.channels);
-    const [dm, setDm] = React.useState(BdApi.Plugins.get("JAML").instance.settings.whitelist.dm);
     const [whitelist, setWhitelist] = React.useState(BdApi.Plugins.get("JAML").instance.settings.is_whitelist_used);
+    const [logBotMessages, setLogBotMessages] = React.useState(BdApi.Plugins.get("JAML").instance.settings.log_bot_messages);
 
     function handleGuildsChange(e) {
         setGuilds(e.target.value.split(",").map(guild => guild.trim()));
@@ -297,22 +308,22 @@ const SettingsPage = () => {
         setChannels(e.target.value.split(",").map(channel => channel.trim()));
     }
 
-    function handleDmChange(e) {
-        setDm(e.target.value.split(",").map(dm => dm.trim()));
-    }
-
     function handleWhitelistClick() {
         setWhitelist(!whitelist);
+    }
+
+    function handleLogBotMessages() {
+        setLogBotMessages(!logBotMessages);
     }
 
     React.useEffect(() => {
         const settings = {
             whitelist: {
                 guilds,
-                channels,
-                dm
+                channels
             },
-            is_whitelist_used: whitelist
+            is_whitelist_used: whitelist,
+            log_bot_messages: logBotMessages
         };
         BdApi.Plugins.get("JAML").instance.settings = settings;
     });
@@ -328,64 +339,84 @@ const SettingsPage = () => {
                 React.createElement("input", {class: "logger-input bg-tertiary c-normal", onChange: handleChannelsChange, defaultValue: channels}) 
             )
         ),
-        React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
-            React.createElement("label", {}, "DM whitelist: ",
-                React.createElement("input", {class: "logger-input bg-tertiary c-normal", onChange: handleDmChange, defaultValue: dm}) 
-            )
-        ),
-        React.createElement("div", {class: "logger-settings-field bg-secondary c-normal"},
-            React.createElement("label", {}, "whitelist enabled: ",
-                React.createElement("button", {class: "bg-tertiary c-muted bg-hover-secondary", onClick: handleWhitelistClick}, whitelist ? "on" : "off") 
+        React.createElement("div", {class: "logger-settings-field bg-secondary c-normal d-flex"},
+            React.createElement("label", {class: "row", style: {"margin-right": "5px"}}, "whitelist: ",
+                React.createElement("button", {class: "bg-secondary c-muted", onClick: handleWhitelistClick}, whitelist ? "on" : "off") 
+            ),
+            React.createElement("label", {class: "row"}, "log bot messages: ",
+                React.createElement("button", {class: "bg-secondary c-muted", onClick: handleLogBotMessages}, logBotMessages ? "on" : "off") 
             )
         )
     );
 }
 
 const Message = ({message}) => {
-    const ATTACHMENT_HEIGHT = 200;
-    // I don't think this is a good idea..
-    const getUser = BdApi.Plugins.get("JAML").instance.UserStore.getUser;
+    return React.createElement("div", {class: "logger-message-wrapper d-flex bg-secondary c-normal", key: `message-id-${message.id}`},
+        React.createElement("img", {src: message?.author?.avatar_url, class: "logger-message-avatar col"}),
+        React.createElement("div", {class: "logger-message-content-wrapper col"}, 
+            React.createElement(MessageHeader, {userName: message?.author?.username, guildName: message?.guild?.name, channelName: message?.channel?.name, messageTime: message.time}),
+            React.createElement(MessageText, {contents: message?.content}),
+            message?.attachments?.map(attachment => React.createElement(MessageAttachment, {attachment}))
+        )
+    );
+}
 
-    function renderAttachment(attachment) {
-        var media = null;
-        
-        if (attachment?.type.includes("image")) {
-            media = React.createElement("img", {src: attachment?.url, height: ATTACHMENT_HEIGHT});
-        } else if (attachment?.type.includes("video")) {
-            media = React.createElement("video", {src: attachment?.url, height: ATTACHMENT_HEIGHT, type: attachment.type, controls: true, muted: true});
-        }
-
-        return React.createElement("a", {href: attachment?.url, style: {marginRight: "5px"}}, media)
+const MessageHeader = ({userName, guildName, channelName, messageTime}) => {
+    function getPath() {
+        if (!guildName) return `DM`;
+        return `${guildName}/${channelName}`;
     }
 
-    function renderContent(text) {
-        const urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-        const emojiRegex = /<:[A-Za-z0-9]+:[0-9]+>/i;
-        const userRegex = /<@[0-9]+>/i;
+    function getTimeString() {
+        return new Date(messageTime).toUTCString();
+    }
 
-        return text.split(" ").map(part => {
+    return React.createElement("div", {class: "logger-message-header row"}, `${userName} in ${getPath()} (${getTimeString()})`);
+}
+
+const MessageText = ({contents}) => {
+    //hueta...
+    function replaceUrlsAndEmoji(content) {
+        const urlRegex =/(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+        const emojiRegex = /<:[A-Za-z0-9]+:[0-9]+>/ig;
+
+        return content?.split(" ").map(part => {
             if (urlRegex.test(part)) {
                 return React.createElement("a", {href: part}, part + " ");
             } else if (emojiRegex.test(part)) {
                 const emojiId = part.substring(0, part.length - 1).split(":")[2];
-                return React.createElement("img", {src: `https://cdn.discordapp.com/emojis/${emojiId}`, height: "18px"});
-            } else if(userRegex.test(part)) {
-                const userId = part.substring(2, part.length - 1);
-                const user = getUser(userId);
-                return `@${user.username} `;
+                return React.createElement("img", {src: `https://cdn.discordapp.com/emojis/${emojiId}`, height: "16px"});
             } else {
                 return part + " ";
             }
         });
     }
 
-    return React.createElement("div", {class: "logger-message-wrapper d-flex bg-secondary c-normal", key: `message-id-${message.id}`},
-        React.createElement("img", {src: message?.author?.avatar_url, class: "logger-message-avatar col"}),
-        React.createElement("div", {class: "logger-message-content-wrapper col"}, 
-            React.createElement("div", {class: "logger-message-header row"}, `${message?.author?.username} in ${message?.guild?.name}/${message?.channel?.name} (${new Date(message.time).toUTCString()})`),
-            React.createElement("div", {class: "logger-messsage-content row"}, renderContent(message?.content)),
-            message?.attachments?.map(attachment => renderAttachment(attachment))
-        )
+    function getClass(isLast) {
+        return (isLast) ? null : "c-muted";
+    }
+
+    return React.createElement("div", {class: "logger-messsage-content row"}, 
+        contents.map((content, index) => {
+            const isLast = index == contents.length - 1;
+            return React.createElement("div", {class: getClass(isLast)}, replaceUrlsAndEmoji(content));
+        })
     );
+}
+
+const MessageAttachment = ({attachment}) => {
+    const ATTACHMENT_HEIGHT = 200;
+
+    function renderMedia() {
+        var media = null;
+        if (attachment?.type.includes("image")) {
+            media = React.createElement("img", {src: attachment?.url, height: ATTACHMENT_HEIGHT});
+        } else if (attachment?.type.includes("video")) {
+            media = React.createElement("video", {src: attachment?.url, height: ATTACHMENT_HEIGHT, type: attachment.type, controls: true, muted: true});
+        }
+        return media;
+    }
+
+    return React.createElement("a", {href: attachment?.url, style: {marginRight: "5px"}}, renderMedia());
 }
 /*===================  MENU END  ========================*/
